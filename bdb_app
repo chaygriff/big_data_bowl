@@ -1,0 +1,214 @@
+library(shiny)
+library(reactable)
+library(tidyverse)
+library(janitor)
+
+# Read CSV File
+df <- read_csv("bdb.csv") %>% clean_names()
+df <- as_tibble(df)
+
+# Rearrange the columns to move the last column ("email") one position to the left
+df <- df[c(names(df)[1:(ncol(df)-2)], names(df)[ncol(df)], names(df)[ncol(df)-1])]
+
+df <- df %>%
+  mutate(hyperlinked_title = paste0('<a href="', link, '" target="_blank">', data_bowl_submission, '</a>'))
+
+# Get all column names
+cols <- names(df)
+
+# Remove 'hyperlinked_title' from the list
+cols <- cols[cols != "hyperlinked_title"]
+
+# Insert 'hyperlinked_title' as the third element
+cols <- c(cols[1:2], "hyperlinked_title", cols[3:length(cols)])
+
+# Reorder columns in the dfframe
+df <- df[cols]
+
+create_links <- function(value) {
+  # Check if the value is non-empty and not NA
+  if (!is.na(value) && nzchar(value)) {
+    # Assuming value is a valid URL
+    paste0('<a href="', value, '" target="_blank">', value, '</a>')
+  } else {
+    ""
+  }
+}
+
+# Function to create Twitter logo links
+create_twitter_links <- function(value) {
+  twitter_logo_url <- "https://upload.wikimedia.org/wikipedia/commons/b/b7/X_logo.jpg"  
+  if (!is.na(value) && value != "") {
+    paste0('<a href="', value, '" target="_blank"><img src="', twitter_logo_url, '" alt="Twitter" style="width:30px;height:30px;"/></a>')
+  } else {
+    ""
+  }
+}
+
+# Function to create LinkedIn logo links
+create_linkedin_links <- function(value) {
+  linkedin_logo_url <- "https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png" 
+  if (!is.na(value) && value != "") {
+    paste0('<a href="', value, '" target="_blank"><img src="', linkedin_logo_url, '" alt="LinkedIn" style="width:30px;height:30px;"/></a>')
+  } else {
+    ""
+  }
+}
+
+create_github_links <- function(value) {
+  github_logo_url <- "https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg" 
+  if (!is.na(value) && value != "") {
+    paste0('<a href="', value, '" target="_blank"><img src="', github_logo_url, '" alt="GitHub" style="width:30px;height:30px;"/></a>')
+  } else {
+    ""
+  }
+}
+
+# Function to create mailto links with an email icon
+create_mailto_links <- function(email) {
+  email_icon_url <- "https://upload.wikimedia.org/wikipedia/commons/e/ec/Circle-icons-mail.svg"  
+  if (!is.na(email) && email != "") {
+    paste0('<a href="mailto:', email, '"><img src="', email_icon_url, '" alt="Email" style="width:30px;height:30px;"/></a>')
+  } else {
+    ""
+  }
+}
+
+# Define UI
+ui <- navbarPage(
+  title = div("By: ", tags$a(href = "https://twitter.com/chaygriff", target = "_blank", "@chaygriff")),  # Hyperlinked title
+  id = "main-nav",
+  
+  tabPanel("Contestants",  # First tab title
+           fluidPage(
+             # Custom CSS to position the logo and adjust the title
+             tags$head(
+               tags$style(HTML("
+          #logo {
+            position: fixed;
+            top: 60px;
+            left: 30px;
+            height: 80px;  # Adjust height as needed
+          }
+          #main-title {
+            margin-left: 70px;  # Adjust this value to shift the title to the left
+          }
+        "))
+             ),
+             
+             # Inserting the NFL logo
+             tags$img(src = "https://upload.wikimedia.org/wikipedia/en/thumb/a/a2/National_Football_League_logo.svg/1920px-National_Football_League_logo.svg.png", id = "logo", alt = "NFL Logo"),
+             
+             tags$h1("2024 Big Data Bowl Contestants", id = "main-title"),
+             
+             br(),
+             selectInput("companyFilter", "Select Institution:",
+                         choices = c("All", unique(df$company_university)),
+                         selected = "All"),
+             reactableOutput("table")
+           )
+  ),
+  
+  # You can add more tabPanel() calls here for additional pages
+  tabPanel("Insights",
+           fluidPage(
+             fluidRow(
+               column(6, plotOutput("plot")),
+               column(6, plotOutput("plot2"))
+             )
+           )
+  )
+)
+
+# Define Server Logic
+server <- function(input, output) {
+  filtered_df <- reactive({
+    if (input$companyFilter == "All") {
+      df
+    } else {
+      df %>% filter(company_university == input$companyFilter)
+    }
+  })
+  
+  output$table <- renderReactable({
+    reactable(filtered_df(), 
+              searchable = TRUE,
+              highlight = TRUE,
+              outlined = TRUE,
+              bordered = TRUE,
+              defaultColDef = colDef(align = "center"),
+              columns = list(
+                name = colDef(name = "Name", width = 100),
+                company_university = colDef(name = "Institution", width = 150),
+                data_bowl_submission = colDef(show = FALSE, name = "Title", html = TRUE, cell = create_links),
+                linked_in = colDef(name = "LinkedIn", html = TRUE, cell = create_linkedin_links, align = "center"),
+                twitter = colDef(name = "Twitter/X", html = TRUE, cell = create_twitter_links, align = "center"),
+                git = colDef(name = "Github", html = TRUE, cell = create_github_links, align = "center"),
+                other = colDef(html = TRUE, cell = create_links, align = "center", width = 100),
+                email = colDef(name = "E-mail", html = TRUE, cell = create_mailto_links, align = "center"),
+                hyperlinked_title = colDef(name = "Title", html = TRUE, width = 180),
+                link = colDef(show = FALSE)
+              ))
+  })
+  
+  output$plot <- renderPlot({
+    df %>%
+      mutate(li_profiles = ifelse(!is.na(linked_in), 1, 0)) %>%
+      group_by(company_university) %>%
+      summarize(total_li = sum(li_profiles)) %>%
+      filter(total_li > 1) %>%
+      ggplot(aes(company_university, total_li))+
+      geom_col(fill = "red", width = 0.5)+
+      coord_flip()+
+      xlab("")+
+      ylab("")+
+      theme_minimal()+
+      ggtitle("Most Entries by University or Organization")+
+      theme(axis.text = element_text(size = 14))
+  })
+  
+  output$plot2 <- renderPlot({
+    
+    total_li <- df %>%
+      group_by(linked_in) %>%
+      filter(!is.na(linked_in)) %>%
+      summarize(li = n()) %>%
+      ungroup() %>%
+      summarize(total_li = sum(li),
+                li_pct = (total_li / 137) * 100)
+    
+    total_git <- df %>%
+      group_by(git) %>%
+      filter(!is.na(git)) %>%
+      summarize(github = n()) %>%
+      ungroup() %>%
+      summarize(total_git = sum(github),
+                git_pct = (total_git / 137) * 100)
+    
+    total_twitter <- df %>%
+      group_by(twitter) %>%
+      filter(!is.na(twitter)) %>%
+      summarize(twit = n()) %>%
+      ungroup() %>%
+      summarize(total_twit = sum(twit),
+                twit_pct = (total_twit / 137) * 100)
+    
+    plot_data <- data_frame(total_li, total_git, total_twitter) %>%
+      pivot_longer(cols = c("li_pct", "git_pct", "twit_pct"), names_to = "social")
+    
+    plot_data %>%
+      ggplot(aes(reorder(social, value), value))+
+      geom_col(fill = "blue", width = 0.5)+
+      coord_flip()+
+      theme_minimal()+
+      ylab("% of Profiles")+
+      xlab("Social Platform")+
+      theme(axis.text = element_text(size = 14))+
+      ggtitle("Percent of Entrants with Social Profiles (in this app)")
+    
+  })
+}
+
+# Run the App
+shinyApp(ui, server)
+
